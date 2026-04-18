@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pretext — Text flows around a moving figure</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <header>
+    <h1>Pretext <span class="dim">·</span> text flows around a moving figure</h1>
+    <p class="subtitle">
+      Inspired by <a href="https://github.com/chenglou/pretext" target="_blank" rel="noopener">Cheng Lou's Pretext</a>
+      — words measured once with Canvas, laid out with pure arithmetic every frame.
+    </p>
+  </header>
+
+  <div id="controls">
+    <div class="control-group row">
+      <button id="playBtn" class="btn-primary">Play</button>
+      <button id="resetBtn">Restart</button>
+    </div>
+
+    <div class="control-group">
+      <label for="fontSz">Font size</label>
+      <select id="fontSz">
+        <option value="12">12px</option>
+        <option value="14" selected>14px</option>
+        <option value="16">16px</option>
+        <option value="18">18px</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="textStyle">Text color</label>
+      <select id="textStyle">
+        <option value="white">White</option>
+        <option value="teal">Teal</option>
+        <option value="amber">Amber</option>
+        <option value="purple">Purple</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="padSlider">Figure padding <span class="slider-val" id="padVal">18</span>px</label>
+      <input type="range" id="padSlider" min="2" max="50" value="18" step="1" />
+    </div>
+
+    <div class="control-group">
+      <label for="threshSlider">Dark threshold <span class="slider-val" id="threshVal">90</span></label>
+      <input type="range" id="threshSlider" min="50" max="140" value="90" step="2" />
+    </div>
+
+    <div class="control-group checkboxes">
+      <label><input type="checkbox" id="showBoxes" checked /> Show figure box</label>
+      <label><input type="checkbox" id="showTree"  checked /> Show tree zone</label>
+    </div>
+  </div>
+
+  <div id="stats">
+    <span>layout <b id="lt">—</b> ms</span>
+    <span>lines <b id="ln">—</b></span>
+    <span>figure <b id="figPos">—</b></span>
+    <span>fps <b id="fpsOut">—</b></span>
+  </div>
+
+  <div id="stage">
+    <canvas id="videoCanvas"></canvas>
+    <canvas id="textCanvas"></canvas>
+  </div>
+
+  <video
+    id="video"
+    src="assets/snow-video.mp4"
+    loop
+    playsinline
+    preload="auto"
+  ></video>
+
+  <p class="hint">
+    Figure detected via connected-component blob analysis (dark clothing vs white snow).
+    Tree/branch region is a fixed exclusion zone — text always flows around it.
+  </p>
+
+  <script type="module" src="js/main.js"></script>
+
+</body>
+</html>
