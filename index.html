@@ -1,89 +1,691 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pretext — Text flows around a moving figure</title>
-  <link rel="stylesheet" href="css/style.css" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gesture Breaker</title>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@700;800&display=swap" rel="stylesheet">
+<style>
+html, body { margin:0; height:100%; background:#06080f; font-family:system-ui,Segoe UI,Arial; color:#dff; }
+#wrap { position:relative; width:100vw; height:100vh; overflow:hidden; }
+#video {
+position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+transform: scaleX(-1);
+z-index:0; opacity:1; pointer-events:none;
+}
+canvas { position:absolute; inset:0; width:100%; height:100%; display:block; z-index:1; }
+
+#hud {
+position:absolute; top:8px; right:8px; display:flex; flex-direction:column; align-items:flex-end; gap:8px;
+pointer-events:none; z-index:2;
+}
+.panel {
+display:flex; align-items:center; gap:8px;
+background: rgba(0, 20, 30, 0.35);
+border: 1px solid #0ff4;
+border-radius: 10px; padding: 6px 8px;
+box-shadow: 0 0 8px #0ff2 inset;
+backdrop-filter: blur(2px);
+}
+.emoji { font-size: 18px; filter: drop-shadow(0 0 4px #0ff); }
+.text { font-weight:600; text-shadow:0 0 6px #0ff; }
+.bar { width: 80px; height: 10px; border:1px solid #0ff8; border-radius:6px; box-shadow:0 0 6px #0ff6 inset; padding:1px; }
+.bar > div { height:100%; background:linear-gradient(90deg,#0ff,#6ff); width:100%; border-radius:4px; box-shadow:0 0 8px #0ff; }
+
+#overlay {
+position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+background:linear-gradient(180deg, rgba(0,0,0,.6), rgba(0,0,0,.8)); color:#cfe; text-align:center; flex-direction:column; gap:.5rem;
+z-index:3; padding: 1rem;
+}
+/* Header font change: Open Sans, 60px, bold */
+#overlay h1 { font-family: 'Open Sans', system-ui, Segoe UI, Arial; font-size: 60px; font-weight: 800; margin:0 0 .5rem 0; }
+
+#overlay button { background:#0ef; border:none; padding:12px 18px; color:#001219; font-weight:700; border-radius:8px; cursor:pointer; }
+#overlay .howto { text-align:left; max-width: 520px; margin: 0 auto; }
+#overlay ul { margin: 0.5rem 0 0.5rem 1rem; padding: 0; }
+#overlay .board { margin-top: 0.5rem; text-align:left; max-width: 520px; width:100%; }
+#overlay .board h3 { margin: 0.6rem 0 0.3rem 0; }
+#overlay .board ol { margin: 0.2rem 0 0.2rem 1.2rem; padding: 0; }
+</style>
+
 </head>
 <body>
+<div id="wrap">
+<video id="video" playsinline></video>
+<canvas id="game"></canvas>
 
-  <header>
-    <h1>Pretext <span class="dim">·</span> text flows around a moving figure</h1>
-    <p class="subtitle">
-      Inspired by <a href="https://github.com/chenglou/pretext" target="_blank" rel="noopener">Cheng Lou's Pretext</a>
-      — words measured once with Canvas, laid out with pure arithmetic every frame.
-    </p>
-  </header>
+<div id="hud">
+<div id="timerPanel" class="panel">
+<span class="emoji" aria-hidden="true">⏱️</span>
+<span id="time" class="text">60.0s</span>
+</div>
+<div id="livesPanel" class="panel">
+<span class="emoji" aria-hidden="true">❤️</span>
+<span id="livesVis" class="text">❤️❤️❤️</span>
+</div>
+<div id="magnetPanel" class="panel">
+<span class="emoji" aria-hidden="true">🧲</span>
+<div class="bar"><div id="magBar"></div></div>
+<span id="magText" class="text">Ready</span>
+</div>
+<div id="scorePanel" class="panel">
+<span class="emoji" aria-hidden="true">⭐️</span>
+<span id="score" class="text">0</span>
+</div>
+<div id="comboPanel" class="panel">
+<span class="emoji" aria-hidden="true">🎵</span>
+<span id="combo" class="text">x0</span>
+</div>
+</div>
 
-  <div id="controls">
-    <div class="control-group row">
-      <button id="playBtn" class="btn-primary">Play</button>
-      <button id="resetBtn">Restart</button>
-    </div>
+<div id="overlay"></div>
+</div>
 
-    <div class="control-group">
-      <label for="fontSz">Font size</label>
-      <select id="fontSz">
-        <option value="12">12px</option>
-        <option value="14" selected>14px</option>
-        <option value="16">16px</option>
-        <option value="18">18px</option>
-      </select>
-    </div>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script>
+(() => {
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const videoEl = document.getElementById('video');
 
-    <div class="control-group">
-      <label for="textStyle">Text color</label>
-      <select id="textStyle">
-        <option value="white">White</option>
-        <option value="teal">Teal</option>
-        <option value="amber">Amber</option>
-        <option value="purple">Purple</option>
-      </select>
-    </div>
+const scoreEl = document.getElementById('score');
+const comboEl = document.getElementById('combo');
+const livesVisEl = document.getElementById('livesVis');
+const magBarEl = document.getElementById('magBar');
+const magTextEl = document.getElementById('magText');
+const timeEl = document.getElementById('time');
 
-    <div class="control-group">
-      <label for="padSlider">Figure padding <span class="slider-val" id="padVal">18</span>px</label>
-      <input type="range" id="padSlider" min="2" max="50" value="18" step="1" />
-    </div>
+const assets = { star: new Image(), skull: new Image(), useSprites: false };
+function tryEnableSprites() {
+if (assets.star.complete && assets.star.naturalWidth && assets.skull.complete && assets.skull.naturalWidth) {
+assets.useSprites = true;
+ctx.imageSmoothingEnabled = false;
+}
+}
+assets.star.onload = tryEnableSprites;
+assets.skull.onload = tryEnableSprites;
 
-    <div class="control-group">
-      <label for="threshSlider">Dark threshold <span class="slider-val" id="threshVal">90</span></label>
-      <input type="range" id="threshSlider" min="50" max="140" value="90" step="2" />
-    </div>
+let W, H, DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+function resize() {
+W = canvas.clientWidth; H = canvas.clientHeight;
+canvas.width = Math.floor(W * DPR); canvas.height = Math.floor(H * DPR);
+ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
 
-    <div class="control-group checkboxes">
-      <label><input type="checkbox" id="showBoxes" checked /> Show figure box</label>
-      <label><input type="checkbox" id="showTree"  checked /> Show tree zone</label>
-    </div>
-  </div>
+const audio = {
+ctx: null, started:false, master: null,
+init() {
+if (this.started) return;
+this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+this.master = this.ctx.createGain();
+this.master.gain.value = 0.4;
+this.master.connect(this.ctx.destination);
+this.started = true;
+},
+env(duration=0.15, gain=0.6) {
+const g = this.ctx.createGain();
+const t = this.ctx.currentTime;
+g.gain.setValueAtTime(0, t);
+g.gain.linearRampToValueAtTime(gain, t + 0.01);
+g.gain.exponentialRampToValueAtTime(0.001, t + duration);
+g.connect(this.master);
+return g;
+},
+beep(freq=440, type='sine', dur=0.12, gain=0.5) {
+if (!this.ctx) return;
+const osc = this.ctx.createOscillator();
+osc.type = type; osc.frequency.value = freq;
+const g = this.env(dur, gain);
+osc.connect(g); osc.start(); osc.stop(this.ctx.currentTime + dur);
+},
+bounce() { this.beep(300 + Math.random()*50, 'square', 0.07, 0.25); },
+brick(combo=0) { this.beep(220 + combo*60, 'triangle', 0.12, 0.6); },
+coin() { this.beep(880, 'sine', 0.08, 0.5); this.beep(1320,'sine',0.06,0.35); },
+skull() { this.beep(140, 'sawtooth', 0.16, 0.5); },
+lifeLost() { this.beep(100, 'square', 0.4, 0.5); },
+launch() { this.beep(520, 'triangle', 0.1, 0.45); }
+};
 
-  <div id="stats">
-    <span>layout <b id="lt">—</b> ms</span>
-    <span>lines <b id="ln">—</b></span>
-    <span>figure <b id="figPos">—</b></span>
-    <span>fps <b id="fpsOut">—</b></span>
-  </div>
+const STORAGE_KEY = 'gesture_breaker_scores_v1';
+function loadScores() {
+try { const s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : []; }
+catch { return []; }
+}
+function saveScore(score) {
+const arr = loadScores();
+const entry = { score, when: Date.now() };
+arr.push(entry);
+arr.sort((a,b) => b.score - a.score || a.when - b.when);
+localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+const rank = arr.findIndex(e => e.when === entry.when) + 1;
+return { rank, board: arr };
+}
+function formatBoardHTML(arr, max=5) {
+const top = arr.slice(0, max);
+if (top.length === 0) return '<div>No scores yet. Be the first!</div>';
+return '<ol>' + top.map((e,i)=>`<li>#${i+1} — ${e.score} pts</li>`).join('') + '</ol>';
+}
 
-  <div id="stage">
-    <canvas id="videoCanvas"></canvas>
-    <canvas id="textCanvas"></canvas>
-  </div>
+const state = {
+score: 0, lives: 3, gameOver: false,
+paddle: { x: 0.5, y: 0.92, w: 180, h: 22, baseW: 180, shrinkTimer: 0 },
+handX: 0.5, handXSmooth: 0.5,
+balls: [],
+bricks: [], particles: [], drops: [],
+magnet: { ready:true, cooldown: 0, cooldownMax: 2400, range: 90 },
+combo: 0,
+shake: 0,
+timeLeftMs: 60000,
+extraBallAdded: false
+};
 
-  <video
-    id="video"
-    src="assets/snow-video.mp4"
-    loop
-    playsinline
-    preload="auto"
-  ></video>
+function makeBall(attached=true, offsetX=0) {
+return { x: state.paddle.x*W + offsetX, y: H*state.paddle.y - state.paddle.h/2 - 12, r: 9.6, speed: 420, dx: 0, dy: -1, attached };
+}
 
-  <p class="hint">
-    Figure detected via connected-component blob analysis (dark clothing vs white snow).
-    Tree/branch region is a fixed exclusion zone — text always flows around it.
-  </p>
+function initBricks() {
+const cols = 11, rows = 6;
+const pad = 14, top = 80, gap = 6;
+const brickW = (W - (pad*2) - (gap*(cols-1))) / cols;
+const brickH = 24;
+state.bricks = [];
+for (let r=0; r<rows; r++) {
+for (let c=0; c<cols; c++) {
+const armored = (r%2===1 && (c%3===0));
+const bounty = Math.random() < 0.33;
+state.bricks.push({
+x: pad + c*(brickW+gap),
+y: top + r*(brickH+gap),
+w: brickW, h: brickH,
+hits: armored ? 2 : 1,
+type: armored ? 'armored' : 'standard',
+bounty
+});
+}
+}
+}
 
-  <script type="module" src="js/main.js"></script>
+function addParticles(x,y,color) {
+for (let i=0;i<12;i++){
+state.particles.push({
+x,y, vx:(Math.random()*2-1)*160, vy:(Math.random()*2-1)*160,
+life: 0.5 + Math.random()*0.4, color
+});
+}
+}
 
+function spawnDropsFromBrick(br) {
+const cx = br.x + br.w/2, cy = br.y + br.h/2;
+if (br.bounty) {
+const count = 3 + Math.floor(Math.random() * 3);
+for (let i=0;i<count;i++) state.drops.push({x:cx, y:cy, vy:170, type:'star', kind:'double'});
+if (Math.random() < 0.25) state.drops.push({x:cx, y:cy, vy:170, type:'skull'});
+} else {
+if (Math.random() < (0.80 + Math.random()*0.10)) state.drops.push({x:cx, y:cy, vy:160, type:'star', kind:'regular'});
+if (Math.random() < 0.18) state.drops.push({x:cx, y:cy, vy:160, type:'skull'});
+}
+}
+
+let hands, camera;
+let gesture = { open:false, fist:false, stableOpen:false, stableFist:false, lastChange:0 };
+function setupHands() {
+hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+hands.setOptions({
+selfieMode: true,
+maxNumHands: 1,
+modelComplexity: 1,
+minDetectionConfidence: 0.6,
+minTrackingConfidence: 0.5
+});
+hands.onResults(onHandResults);
+camera = new Camera(videoEl, {
+onFrame: async () => { await hands.send({image: videoEl}); },
+width: 640, height: 480
+});
+camera.start();
+}
+function palmFistHeuristic(landmarks) {
+const wrist = landmarks[0];
+const tips = [8,12,16,20].map(i => landmarks[i]);
+const pips = [6,10,14,18].map(i => landmarks[i]);
+const dx = (a,b)=>a.x-b.x, dy=(a,b)=>a.y-b.y, dz=(a,b)=>a.z-b.z;
+const dist = (a,b)=>Math.hypot(dx(a,b), dy(a,b), dz(a,b));
+const avgTipDist = tips.reduce((s,t)=>s+dist(t,wrist),0)/tips.length;
+let extended = 0;
+for (let i=0;i<4;i++) if (tips[i].y < pips[i].y - 0.02) extended++;
+const thumbTip = landmarks[4];
+const thumbDist = dist(thumbTip, wrist);
+const openScore = avgTipDist + 0.5*thumbDist;
+const open = (openScore > 0.35 && extended >= 2);
+const fist = (openScore < 0.28 && extended <= 1);
+return { open, fist };
+}
+function onHandResults(res) {
+if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+const lm = res.multiHandLandmarks[0];
+let xNorm = lm[0].x;
+xNorm = Math.max(0, Math.min(1, xNorm));
+state.handX = xNorm;
+state.handXSmooth = state.handXSmooth*0.1 + state.handX*0.9;
+const g = palmFistHeuristic(lm);
+const now = performance.now();
+if (g.open !== gesture.open) { gesture.open = g.open; gesture.lastChange = now; }
+if (g.fist !== gesture.fist) { gesture.fist = g.fist; gesture.lastChange = now; }
+gesture.stableOpen = gesture.open && (now - gesture.lastChange > 120);
+gesture.stableFist = gesture.fist && (now - gesture.lastChange > 120);
+} else {
+state.handXSmooth = state.handXSmooth*0.8 + 0.5*0.2;
+gesture.stableOpen = false; gesture.stableFist = false;
+}
+}
+
+function aabb(ax, ay, aw, ah, bx, by, bw, bh) {
+return (ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by);
+}
+function reflectBallFromPaddle(ball) {
+const p = state.paddle;
+const b = ball;
+const rel = (b.x - (p.x * W)) - p.w/2;
+const norm = rel / (p.w/2);
+const angle = (-75 * Math.PI/180) * norm;
+const speed = b.speed;
+b.dx = speed * Math.sin(angle);
+b.dy = -Math.sqrt(Math.max(40, speed*speed - b.dx*b.dx));
+b.speed = Math.min(720, b.speed * 1.015);
+}
+function attachBallToPaddle(ball, offset=0) {
+const p = state.paddle;
+ball.attached = true;
+ball.speed = Math.max(400, ball.speed*0.96);
+ball.x = p.x * W + offset;
+ball.y = H * p.y - p.h/2 - ball.r - 2;
+ball.dx = 0; ball.dy = -1;
+}
+function endSession(reason) {
+state.gameOver = true;
+const { rank, board } = saveScore(state.score);
+showEndOverlay(reason, state.score, rank, board);
+}
+function loseLife() {
+state.lives--;
+state.combo = 0;
+overlayHUD();
+audio.lifeLost();
+state.shake = 16;
+const primary = state.balls[0];
+state.balls = [primary];
+attachBallToPaddle(primary, 0);
+if (state.lives <= 0 && !state.gameOver) endSession('lives');
+}
+
+function showStartOverlay() {
+const board = loadScores();
+overlay.innerHTML = `
+<h1>Gesture Breaker</h1>
+<div class="howto">
+<strong>How to Play</strong>
+<ul>
+<li>Move your hand left/right to steer the paddle (faster).</li>
+<li>Open your palm to launch; make a fist near the paddle to catch (🧲).</li>
+<li>Catch ⭐ (+50); avoid ☠️ (shrinks paddle).</li>
+<li>Orange bricks drop extra ⭐ — aim for them.</li>
+<li>Score 100 pts to spawn a 2nd ball!</li>
+<li>⏱️ 60 seconds to score as much as possible.</li>
+</ul>
+</div>
+<div class="board">
+<h3>Top Scores</h3>
+${formatBoardHTML(board, 5)}
+</div>
+<button id="startBtn">Play</button>
+`;
+overlay.style.display = 'flex';
+document.getElementById('startBtn').addEventListener('click', start);
+}
+function showEndOverlay(reason, score, rank, board) {
+const title = (reason === 'time') ? "Time's Up!" : "Game Over";
+overlay.innerHTML = `
+<h1>${title}</h1>
+<div style="margin-bottom:.25rem;">Your Score: <strong>${score}</strong></div>
+<div style="margin-bottom:.5rem;">Your Rank: <strong>#${rank}</strong></div>
+<div class="board">
+<h3>Top Scores</h3>
+${formatBoardHTML(board, 5)}
+</div>
+<button id="restartBtn">Play Again</button>
+`;
+overlay.style.display = 'flex';
+document.getElementById('restartBtn').addEventListener('click', () => location.reload());
+}
+
+let last = 0;
+function update(dt) {
+if (!state.gameOver) {
+state.timeLeftMs -= dt * 1000;
+if (state.timeLeftMs <= 0) { state.timeLeftMs = 0; endSession('time'); }
+}
+
+state.paddle.x = state.handXSmooth;
+
+if (state.paddle.shrinkTimer > 0) {
+state.paddle.shrinkTimer -= dt*1000;
+if (state.paddle.shrinkTimer <= 0) state.paddle.w = state.paddle.baseW;
+}
+if (state.magnet.cooldown > 0) {
+state.magnet.cooldown -= dt*1000;
+if (state.magnet.cooldown <= 0) { state.magnet.cooldown = 0; state.magnet.ready = true; }
+}
+
+if (!state.extraBallAdded && state.score >= 100) {
+const b2 = makeBall(true, +14);
+state.balls.push(b2);
+state.extraBallAdded = true;
+}
+
+if (gesture.stableOpen && !state.gameOver) {
+let attachedIndex = 0;
+for (const b of state.balls) {
+if (b.attached) {
+audio.launch();
+b.attached = false;
+const rel = (state.handXSmooth - 0.5);
+const baseAngle = (-Math.PI/3) * rel;
+const offset = (attachedIndex === 0 ? -Math.PI/14 : Math.PI/14);
+const ang = baseAngle + offset * (attachedIndex % 2 === 0 ? -1 : 1);
+const speed = b.speed;
+b.dx = speed * Math.sin(ang);
+b.dy = -Math.sqrt(Math.max(100, speed*speed - b.dx*b.dx));
+attachedIndex++;
+}
+}
+gesture.stableOpen = false;
+}
+
+for (let bi=0; bi<state.balls.length; bi++) {
+const b = state.balls[bi];
+if (b.attached) {
+const attachedCount = state.balls.filter(x=>x.attached).length;
+const idx = state.balls.filter(x=>x.attached).indexOf(b);
+const offset = (attachedCount > 1) ? ((idx===0)? -14 : 14) : 0;
+b.x = state.paddle.x * W + offset;
+b.y = H * state.paddle.y - state.paddle.h/2 - b.r - 2;
+continue;
+}
+
+b.x += b.dx * dt;
+b.y += b.dy * dt;
+
+if (b.x - b.r < 0) { b.x = b.r; b.dx = Math.abs(b.dx); audio.bounce(); }
+else if (b.x + b.r > W) { b.x = W - b.r; b.dx = -Math.abs(b.dx); audio.bounce(); }
+if (b.y - b.r < 0) { b.y = b.r; b.dy = Math.abs(b.dy); audio.bounce(); }
+
+const p = state.paddle;
+const px = p.x * W - p.w/2;
+const py = H * p.y - p.h/2;
+if (aabb(b.x-b.r, b.y-b.r, b.r*2, b.r*2, px, py, p.w, p.h) && b.dy > 0) {
+b.y = py - b.r;
+reflectBallFromPaddle(b);
+audio.bounce();
+state.combo = 0;
+}
+
+if (gesture.stableFist && state.magnet.ready && !state.gameOver) {
+const nearY = (Math.abs((H*p.y - p.h/2) - b.y) < state.magnet.range);
+const nearX = (Math.abs((p.x*W) - b.x) < p.w/2 + 20);
+if (nearX && nearY) {
+attachBallToPaddle(b, 0);
+state.magnet.ready = false;
+state.magnet.cooldown = state.magnet.cooldownMax;
+audio.bounce();
+}
+}
+
+if (b.y - b.r > H+12 && !state.gameOver) {
+state.balls.splice(bi,1); bi--;
+if (state.balls.length === 0) {
+const nb = makeBall(true, 0);
+state.balls.push(nb);
+loseLife();
+}
+}
+}
+
+for (let i=state.drops.length-1; i>=0; i--) {
+const d = state.drops[i];
+d.y += d.vy * dt;
+const p = state.paddle;
+const px = p.x * W - p.w/2, py = H*p.y - p.h/2;
+if (aabb(d.x-16, d.y-16, 32, 32, px, py, p.w, p.h)) {
+if (d.type==='star') { state.score += 50; audio.coin(); }
+else { audio.skull(); state.paddle.w = Math.max(60, state.paddle.baseW * 0.6); state.paddle.shrinkTimer = 4000; }
+state.drops.splice(i,1);
+} else if (d.y > H+40) {
+state.drops.splice(i,1);
+}
+}
+
+for (let bi=0; bi<state.balls.length; bi++) {
+const b = state.balls[bi];
+if (b.attached) continue;
+for (let i=state.bricks.length-1; i>=0; i--) {
+const br = state.bricks[i];
+if (aabb(b.x-b.r, b.y-b.r, b.r*2, b.r*2, br.x, br.y, br.w, br.h)) {
+const overlapX = (b.x < br.x) ? (b.x + b.r - br.x) : (br.x + br.w - (b.x - b.r));
+const overlapY = (b.y < br.y) ? (b.y + b.r - br.y) : (br.y + br.h - (b.y - b.r));
+if (overlapX < overlapY) b.dx *= -1; else b.dy *= -1;
+
+br.hits--;
+if (br.hits <= 0) {
+state.bricks.splice(i,1);
+const color = br.bounty ? '#ffb400' : (br.type==='armored' ? '#9ff' : '#0ff');
+addParticles(b.x, b.y, color);
+state.score += (br.type==='armored' ? 30 : 10);
+state.combo++;
+audio.brick(state.combo);
+spawnDropsFromBrick(br);
+} else {
+state.score += 5;
+audio.bounce();
+}
+break;
+}
+}
+}
+
+for (let i=state.particles.length-1; i>=0; i--) {
+const p = state.particles[i];
+p.life -= dt;
+p.x += p.vx * dt; p.y += p.vy * dt;
+p.vx *= 0.98; p.vy += 400*dt;
+if (p.life <= 0) state.particles.splice(i,1);
+}
+
+if (state.shake > 0) state.shake -= 60*dt;
+
+overlayHUD();
+}
+
+function overlayHUD() {
+scoreEl.textContent = `${state.score}`;
+comboEl.textContent = `x${state.combo}`;
+livesVisEl.textContent = '❤️'.repeat(Math.max(0, state.lives)) || '💀';
+if (state.magnet.ready) {
+magBarEl.style.width = '100%';
+magBarEl.style.background = 'linear-gradient(90deg,#0f8,#6f8)';
+magTextEl.textContent = 'Ready';
+} else {
+const frac = 1 - (state.magnet.cooldown / state.magnet.cooldownMax);
+magBarEl.style.width = `${Math.max(0, Math.min(1, frac))*100}%`;
+magBarEl.style.background = 'linear-gradient(90deg,#ff0,#fa0)';
+magTextEl.textContent = `${Math.ceil(state.magnet.cooldown/100)/10}s`;
+}
+timeEl.textContent = `${(state.timeLeftMs/1000).toFixed(1)}s`;
+}
+
+function neonRect(x,y,w,h,color, glow=12) {
+ctx.save();
+ctx.shadowBlur = glow; ctx.shadowColor = color;
+ctx.fillStyle = color; ctx.fillRect(x,y,w,h);
+ctx.restore();
+}
+function neonCircle(x,y,r,color, glow=12) {
+ctx.save();
+ctx.shadowBlur = glow; ctx.shadowColor = color;
+ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+ctx.restore();
+}
+
+// Emoji drawing helper: full-opacity emoji with colored glow background
+function drawDropEmojiWithGlow(x, y, emoji, glowColor) {
+ctx.save();
+// Draw a radial glow background circle behind the emoji
+const grd = ctx.createRadialGradient(x, y, 0, x, y, 22);
+grd.addColorStop(0, glowColor);
+grd.addColorStop(1, 'rgba(0,0,0,0)');
+ctx.fillStyle = grd;
+ctx.beginPath();
+ctx.arc(x, y, 22, 0, Math.PI*2);
+ctx.fill();
+// Draw the emoji fully opaque on top (no shadow-based transparency)
+ctx.textAlign = 'center';
+ctx.textBaseline = 'middle';
+ctx.font = '30px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif';
+ctx.shadowBlur = 0;
+ctx.fillStyle = '#fff'; // ensures full paint; emoji color itself comes from font
+ctx.fillText(emoji, x, y);
+ctx.restore();
+}
+
+function render() {
+const shakeX = state.shake>0 ? (Math.random()*2-1)*state.shake : 0;
+const shakeY = state.shake>0 ? (Math.random()*2-1)*state.shake : 0;
+ctx.save();
+ctx.translate(shakeX, shakeY);
+
+ctx.clearRect(0,0,W,H);
+ctx.fillStyle = 'rgba(6, 8, 15, 0.25)';
+ctx.fillRect(0,0,W,H);
+
+ctx.strokeStyle = '#0ff1';
+ctx.lineWidth = 1;
+ctx.beginPath();
+for (let y=60; y<H; y+=40) { ctx.moveTo(0,y); ctx.lineTo(W,y); }
+for (let x=0; x<W; x+=40) { ctx.moveTo(x,60); ctx.lineTo(x,H); }
+ctx.stroke();
+
+for (const br of state.bricks) {
+let color;
+if (br.bounty) color = '#ffb400';
+else color = br.type==='armored' ? (br.hits===2 ? '#07f' : '#49f') : '#0ff';
+neonRect(br.x, br.y, br.w, br.h, color, 10);
+ctx.fillStyle = '#ffffff10'; ctx.fillRect(br.x+2,br.y+2,br.w-4,br.h-4);
+}
+
+// Drops: emojis with glow backgrounds (no transparency)
+for (const d of state.drops) {
+if (assets.useSprites) {
+// If you later provide sprites, this block is still here (visual only)
+const img = d.type==='star' ? assets.star : assets.skull;
+const size = 28;
+ctx.drawImage(img, d.x - size/2, d.y - size/2, size, size);
+} else {
+if (d.type === 'star') {
+if (d.kind === 'double') {
+// Double-point visual: 🤩 with orange glow
+drawDropEmojiWithGlow(d.x, d.y, '🤩', 'rgba(255,140,0,0.95)');
+} else {
+// Regular star: ⭐️ with yellow glow
+drawDropEmojiWithGlow(d.x, d.y, '⭐️', 'rgba(255,209,45,0.95)');
+}
+} else {
+// Skull: 💀 with blue glow
+drawDropEmojiWithGlow(d.x, d.y, '💀', 'rgba(80,160,255,0.95)');
+}
+}
+}
+
+for (const p of state.particles) {
+const alpha = Math.max(0, Math.min(1, p.life*2));
+ctx.save(); ctx.globalAlpha = alpha;
+neonRect(p.x, p.y, 3, 3, p.color, 8);
+ctx.restore();
+}
+
+const p = state.paddle;
+neonRect(p.x*W - p.w/2, H*p.y - p.h/2, p.w, p.h, '#0ff', 18);
+if (state.magnet.ready) {
+ctx.strokeStyle = '#0ff6'; ctx.lineWidth = 2;
+ctx.beginPath();
+ctx.arc(p.x*W, H*p.y - p.h/2, p.w*0.7, 0, Math.PI, true); ctx.stroke();
+}
+
+for (const b of state.balls) {
+neonCircle(b.x, b.y, b.r, '#9ff', 14);
+}
+
+ctx.restore();
+}
+
+function loop(t) {
+if (!last) last = t;
+const dt = Math.min(0.033, (t - last) / 1000);
+last = t;
+if (!state.gameOver) update(dt);
+render();
+requestAnimationFrame(loop);
+}
+
+function start() {
+state.score = 0;
+state.lives = 3;
+state.combo = 0;
+state.timeLeftMs = 60000;
+state.gameOver = false;
+state.drops.length = 0;
+state.particles.length = 0;
+state.extraBallAdded = false;
+
+resize();
+initBricks();
+state.balls = [ makeBall(true, 0) ];
+
+overlay.style.display = 'none';
+audio.init();
+setupHands();
+requestAnimationFrame(loop);
+}
+
+function buildStart() {
+const board = loadScores();
+overlay.innerHTML = `
+<h1>Gesture Breaker</h1>
+<div class="howto">
+<strong>How to Play</strong>
+<ul>
+<li>Move your hand left/right to steer the paddle (faster).</li>
+<li>Open your palm to launch; make a fist near the paddle to catch (🧲).</li>
+<li>Catch ⭐ (+50); avoid ☠️ (shrinks paddle).</li>
+<li>Orange bricks drop extra ⭐ — aim for them.</li>
+<li>Score 100 pts to unlock a second ball!</li>
+<li>⏱️ 60 seconds to score as much as possible.</li>
+</ul>
+</div>
+<div class="board">
+<h3>Top Scores</h3>
+${formatBoardHTML(board, 5)}
+</div>
+<button id="startBtn">Play</button>
+`;
+overlay.style.display = 'flex';
+document.getElementById('startBtn').addEventListener('click', start);
+}
+buildStart();
+
+window.addEventListener('pointerdown', () => { audio.init(); });
+})();
+</script>
 </body>
 </html>
